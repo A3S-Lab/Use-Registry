@@ -1,0 +1,10 @@
+admission "a3s/registry-selftest" {
+  package_directory = "packages/registry-selftest"
+  channel           = "stable"
+  target            = "any"
+  display_name      = "A3S Registry Selftest"
+  description       = "Registry-consumption guidance skill that doubles as the bootstrap verification case for the official A3S Use Registry."
+  license           = "Apache-2.0"
+  keywords          = ["registry", "selftest"]
+  categories        = ["registry"]
+}

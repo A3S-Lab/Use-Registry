@@ -1,0 +1,41 @@
+name: verify-registry
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      # The registry tooling is versioned by the A3S Use repository. The pin
+      # below must name the reviewed Use revision that introduced
+      # crates/registry-tools; until that change lands on Use main, this
+      # workflow fails closed here instead of verifying with floating code.
+      - name: Build the registry tools from a pinned Use revision
+        run: |
+          USE_PIN="<pin-to-reviewed-Use-revision>"
+          git clone --depth 1 https://github.com/A3S-Lab/Use.git /tmp/use
+          git -C /tmp/use fetch --depth 1 origin "$USE_PIN"
+          git -C /tmp/use checkout "$USE_PIN"
+          cargo build --release --manifest-path /tmp/use/crates/registry-tools/Cargo.toml
+          echo /tmp/use/target/release >> "$GITHUB_PATH"
+
+      - name: Verify the committed registry tree
+        run: a3s-use-registry-tools verify --registry registry
+
+      - name: Re-assemble from committed admissions and verify
+        run: |
+          a3s-use-registry-tools keygen --keys-dir /tmp/ci-keys
+          a3s-use-registry-tools assemble \
+            --keys-dir /tmp/ci-keys \
+            --admissions admissions.acl \
+            --out-root /tmp/ci-registry
+          a3s-use-registry-tools verify --registry /tmp/ci-registry
