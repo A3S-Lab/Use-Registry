@@ -16,12 +16,11 @@ jobs:
       - uses: actions/checkout@v4
 
       # The registry tooling is versioned by the A3S Use repository. The pin
-      # below must name the reviewed Use revision that introduced
-      # crates/registry-tools; until that change lands on Use main, this
-      # workflow fails closed here instead of verifying with floating code.
+      # below names the registry-tools/bootstrap branch head (A3S-Lab/Use#256);
+      # update it to the reviewed Use main commit when that PR merges.
       - name: Build the registry tools from a pinned Use revision
         run: |
-          USE_PIN="<pin-to-reviewed-Use-revision>"
+          USE_PIN="b494b0643cae3354a79ece03a67f635ce102f467"
           git clone --depth 1 https://github.com/A3S-Lab/Use.git /tmp/use
           git -C /tmp/use fetch --depth 1 origin "$USE_PIN"
           git -C /tmp/use checkout "$USE_PIN"
