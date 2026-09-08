@@ -95,10 +95,13 @@ a redirect or hostname change never rotates trust.
 
 `consume_local.sh` additionally verifies the package-manager client can add the
 source and `plugin plan-install a3s/registry-selftest` against the live local
-URL (TUF refresh + catalog provenance).
+URL, and that plan provenance **equals** the served base URL and bootstrap root
+pin (transport is never trusted on its own).
 
 For a longer soak, leave the server running and re-run `./scripts/smoke_local.sh`,
 `./scripts/serve_local.sh status`, or `./scripts/consume_local.sh` periodically.
+
+Service shape and ownership: [registry-service-architecture.md](registry-service-architecture.md).
 
 ## First-principles test gate
 

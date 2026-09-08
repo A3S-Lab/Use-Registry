@@ -21,14 +21,22 @@ The official signed package Registry deployment for
 | Served path | `registry/` on `main` |
 
 Clients consume this Registry through the pinned digest, never through the
-transport:
+transport. Use a Use **package-manager** build (`0.3.x+` with `registry`
+routes). Homebrew capability wrappers (`0.1.x`) do not implement Registry
+consumption.
 
 ```bash
-a3s-use registry source add official \
+# Prefer an explicit package-manager binary when PATH has a capability wrapper.
+export A3S_USE_BIN=/path/to/a3s-use   # crates/use target/debug/a3s-use
+
+"$A3S_USE_BIN" registry source add official \
   --github A3S-Lab/Use-Registry \
   --trust-root sha256:068207b2a075ab53e4a633084637169deee05a2fce33eb0362a870f5462b3d8a \
   --json
 ```
+
+Architecture (transport vs trust, ownership): 
+[docs/registry-service-architecture.md](docs/registry-service-architecture.md).
 
 ## Admitted packages
 

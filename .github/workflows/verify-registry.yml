@@ -30,6 +30,12 @@ jobs:
       - name: Verify the committed registry tree
         run: a3s-use-registry-tools verify --registry registry
 
+      - name: First-principles local transport gate
+        run: |
+          # Transport/lifecycle invariants only. Client consume (I1/I5) stays
+          # local with A3S_USE_BIN; CI does not treat cache or URL as trust.
+          ./scripts/test_local_registry.sh
+
       - name: Re-assemble from committed admissions and verify
         run: |
           a3s-use-registry-tools keygen --keys-dir /tmp/ci-keys

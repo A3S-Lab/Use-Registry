@@ -20,6 +20,11 @@ supports_registry() {
 
 resolve_use_bin() {
   if [[ -n "${USE_BIN}" ]]; then
+    if ! supports_registry "${USE_BIN}"; then
+      echo "error: A3S_USE_BIN='${USE_BIN}' does not support 'registry source'" >&2
+      echo "note: Homebrew a3s-use capability wrappers (0.1.x) are not Registry clients" >&2
+      exit 1
+    fi
     printf '%s\n' "${USE_BIN}"
     return 0
   fi
@@ -43,10 +48,6 @@ resolve_use_bin() {
 }
 
 USE_BIN="$(resolve_use_bin)"
-if ! "${USE_BIN}" registry source list --json >/dev/null 2>&1; then
-  echo "error: '${USE_BIN}' does not support 'registry source' (capability wrappers are insufficient)" >&2
-  exit 1
-fi
 
 if ! "${ROOT_DIR}/scripts/serve_local.sh" status >/dev/null 2>&1; then
   "${ROOT_DIR}/scripts/serve_local.sh" start
@@ -79,8 +80,16 @@ PLAN_OUT="$("${USE_BIN}" plugin plan-install "${PACKAGE_ID}" \
   --registry-name "${SOURCE_NAME}" \
   --json)"
 
-echo "${PLAN_OUT}" | python3 -c '
-import json, sys
+echo "${PLAN_OUT}" | EXPECTED_URL="${URL}" EXPECTED_ROOT="${EXPECTED_ROOT}" EXPECTED_PKG="${PACKAGE_ID}" HOME_TMP="${HOME_TMP}" python3 -c '
+import json, os, sys
+
+def norm_root(value: str) -> str:
+    value = value.strip()
+    return value if value.startswith("sha256:") else f"sha256:{value}"
+
+def norm_url(value: str) -> str:
+    return value.rstrip("/") + "/"
+
 payload = json.load(sys.stdin)
 if not payload.get("ok"):
     raise SystemExit(f"plan-install failed: {payload}")
@@ -89,5 +98,15 @@ lock = data["plan"]["packageLock"]["packages"][0]["catalog"]["provenance"]
 url = lock["registryUrl"]
 root = lock["rootSha256"]
 pkg = data["packageId"]
-print(f"ok consume package={pkg} registry_url={url} root={root} home={sys.argv[1]}")
-' "${HOME_TMP}"
+expected_url = os.environ["EXPECTED_URL"]
+expected_root = os.environ["EXPECTED_ROOT"]
+expected_pkg = os.environ["EXPECTED_PKG"]
+home = os.environ["HOME_TMP"]
+if norm_url(url) != norm_url(expected_url):
+    raise SystemExit(f"provenance registryUrl mismatch: {url!r} != {expected_url!r}")
+if norm_root(root) != norm_root(expected_root):
+    raise SystemExit(f"provenance rootSha256 mismatch: {root!r} != {expected_root!r}")
+if pkg != expected_pkg:
+    raise SystemExit(f"packageId mismatch: {pkg!r} != {expected_pkg!r}")
+print(f"ok consume package={pkg} registry_url={url} root={root} home={home}")
+'
