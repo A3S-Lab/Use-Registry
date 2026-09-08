@@ -74,6 +74,8 @@ To start a stable local HTTP transport for the committed `registry/` tree
 ./scripts/smoke_local.sh
 # optional: prove Use package-manager consume (needs A3S_USE_BIN with registry routes)
 ./scripts/consume_local.sh
+# first-principles gate (ephemeral port; needs A3S_USE_BIN for I1/I5)
+./scripts/test_local_registry.sh
 ```
 
 Default base URL: `http://127.0.0.1:4873/`. Point a Use **package-manager**

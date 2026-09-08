@@ -99,3 +99,26 @@ URL (TUF refresh + catalog provenance).
 
 For a longer soak, leave the server running and re-run `./scripts/smoke_local.sh`,
 `./scripts/serve_local.sh status`, or `./scripts/consume_local.sh` periodically.
+
+## First-principles test gate
+
+Run the automated gate (ephemeral port + isolated state dir):
+
+```bash
+export A3S_USE_BIN=/path/to/a3s-use   # Use package-manager 0.3.x
+./scripts/test_local_registry.sh
+```
+
+| Invariant | Cases |
+| --- | --- |
+| I1 Transport is not trust | Wrong `--trust-root` fails at `plan-install` |
+| I2 Served bytes == committed tree | Smoke root/target match disk + bootstrap pin |
+| I3 Ready means our listener | Start/status only after our PID owns the port |
+| I4 Lifecycle is deterministic | Status before start fails; start idempotent; stop clears readiness |
+| I5 Client consume uses TUF pin | `consume_local.sh` provenance matches URL + root |
+| I6 Failures are loud | Smoke fails when stopped; busy foreign port refused |
+
+`serve_local.sh` treats a process as ready only when the recorded PID is alive,
+listening on the configured port (via `lsof` when available), and
+`metadata/root.json` is reachable. Stale PID files and foreign listeners do not
+count as a healthy local registry.

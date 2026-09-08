@@ -39,49 +39,106 @@ base_url() {
   printf 'http://%s:%s/' "${HOST}" "${PORT}"
 }
 
-is_running() {
+read_pid() {
   if [[ ! -f "${PID_FILE}" ]]; then
     return 1
   fi
   local pid
-  pid="$(cat "${PID_FILE}")"
-  if ! kill -0 "${pid}" 2>/dev/null; then
+  pid="$(tr -d '[:space:]' <"${PID_FILE}")"
+  if [[ -z "${pid}" || ! "${pid}" =~ ^[0-9]+$ ]]; then
     return 1
   fi
-  return 0
+  printf '%s\n' "${pid}"
+}
+
+process_alive() {
+  local pid="$1"
+  kill -0 "${pid}" 2>/dev/null
+}
+
+# True only when our recorded PID is alive AND listening on HOST:PORT.
+# Prevents claiming "already running" for a stale PID or a foreign listener.
+our_listener_ready() {
+  local pid
+  pid="$(read_pid)" || return 1
+  process_alive "${pid}" || return 1
+
+  if command -v lsof >/dev/null 2>&1; then
+    local listeners
+    listeners="$(lsof -nP -iTCP:"${PORT}" -sTCP:LISTEN 2>/dev/null || true)"
+    if [[ -z "${listeners}" ]]; then
+      return 1
+    fi
+    if ! printf '%s\n' "${listeners}" | awk -v pid="${pid}" 'NR>1 && $2==pid { found=1 } END { exit found ? 0 : 1 }'; then
+      return 1
+    fi
+  fi
+
+  curl -fsS "$(base_url)metadata/root.json" >/dev/null 2>&1
+}
+
+clear_stale_state() {
+  rm -f "${PID_FILE}"
+}
+
+is_running() {
+  our_listener_ready
 }
 
 cmd_start() {
   require_registry
   mkdir -p "${STATE_DIR}"
 
-  if is_running; then
-    echo "already running pid=$(cat "${PID_FILE}") url=$(base_url)"
+  if our_listener_ready; then
+    echo "already running pid=$(read_pid) url=$(base_url)"
     exit 0
   fi
 
-  if command -v python3 >/dev/null 2>&1; then
-    (
-      cd "${REGISTRY_DIR}"
-      # Bind explicitly; directory is registry/ so /metadata and /targets map
-      # at the URL root (same relative layout as the published registry/ path).
-      exec python3 -m http.server "${PORT}" --bind "${HOST}"
-    ) >"${LOG_FILE}" 2>&1 &
-    echo $! >"${PID_FILE}"
-  else
+  # Drop stale PID files or dead processes before binding.
+  if pid="$(read_pid 2>/dev/null || true)" && [[ -n "${pid}" ]]; then
+    if process_alive "${pid}"; then
+      # Alive but not our listener on PORT — do not steal a foreign process;
+      # only clear the PID file if it does not own the port.
+      if command -v lsof >/dev/null 2>&1; then
+        listeners="$(lsof -nP -iTCP:"${PORT}" -sTCP:LISTEN 2>/dev/null || true)"
+        if printf '%s\n' "${listeners}" | awk -v pid="${pid}" 'NR>1 && $2==pid { found=1 } END { exit found ? 0 : 1 }'; then
+          kill "${pid}" 2>/dev/null || true
+        fi
+      else
+        kill "${pid}" 2>/dev/null || true
+      fi
+    fi
+    clear_stale_state
+  fi
+
+  if command -v lsof >/dev/null 2>&1; then
+    if lsof -nP -iTCP:"${PORT}" -sTCP:LISTEN >/dev/null 2>&1; then
+      echo "error: port ${PORT} is already in use by another process" >&2
+      exit 1
+    fi
+  fi
+
+  if ! command -v python3 >/dev/null 2>&1; then
     echo "error: python3 is required to serve the static registry tree" >&2
     exit 1
   fi
+
+  (
+    cd "${REGISTRY_DIR}"
+    # Bind explicitly; directory is registry/ so /metadata and /targets map
+    # at the URL root (same relative layout as the published registry/ path).
+    exec python3 -m http.server "${PORT}" --bind "${HOST}"
+  ) >"${LOG_FILE}" 2>&1 &
+  echo $! >"${PID_FILE}"
 
   local url
   url="$(base_url)"
   printf '%s\n' "${url}" >"${URL_FILE}"
 
-  # Ready probe: root metadata must be reachable.
   local i
-  for i in 1 2 3 4 5 6 7 8 9 10; do
-    if curl -fsS "${url}metadata/root.json" >/dev/null 2>&1; then
-      echo "started pid=$(cat "${PID_FILE}") url=${url}"
+  for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+    if our_listener_ready; then
+      echo "started pid=$(read_pid) url=${url}"
       return 0
     fi
     sleep 0.2
@@ -93,38 +150,36 @@ cmd_start() {
 }
 
 cmd_stop() {
-  if [[ ! -f "${PID_FILE}" ]]; then
+  local pid=""
+  pid="$(read_pid 2>/dev/null || true)"
+  if [[ -z "${pid}" ]]; then
     echo "not running"
     return 0
   fi
-  local pid
-  pid="$(cat "${PID_FILE}")"
-  if kill -0 "${pid}" 2>/dev/null; then
+  if process_alive "${pid}"; then
     kill "${pid}" 2>/dev/null || true
     local i
     for i in 1 2 3 4 5 6 7 8 9 10; do
-      if ! kill -0 "${pid}" 2>/dev/null; then
+      if ! process_alive "${pid}"; then
         break
       fi
       sleep 0.1
     done
-    if kill -0 "${pid}" 2>/dev/null; then
+    if process_alive "${pid}"; then
       kill -9 "${pid}" 2>/dev/null || true
     fi
   fi
-  rm -f "${PID_FILE}"
+  clear_stale_state
   echo "stopped"
 }
 
 cmd_status() {
-  if is_running; then
-    local url
-    url="$(base_url)"
-    if curl -fsS "${url}metadata/root.json" >/dev/null 2>&1; then
-      echo "running pid=$(cat "${PID_FILE}") url=${url} ready=1"
-      return 0
-    fi
-    echo "running pid=$(cat "${PID_FILE}") url=${url} ready=0" >&2
+  if our_listener_ready; then
+    echo "running pid=$(read_pid) url=$(base_url) ready=1"
+    return 0
+  fi
+  if pid="$(read_pid 2>/dev/null || true)" && [[ -n "${pid}" ]] && process_alive "${pid}"; then
+    echo "running pid=${pid} url=$(base_url) ready=0" >&2
     return 1
   fi
   echo "not running"
