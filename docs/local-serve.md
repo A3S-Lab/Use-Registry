@@ -67,6 +67,8 @@ URL="$(./scripts/serve_local.sh url)"
 
 "$A3S_USE_BIN" plugin plan-install a3s/registry-selftest \
   --registry-name local \
+  --scope-kind user \
+  --scope-id user/registry-local \
   --json
 ```
 

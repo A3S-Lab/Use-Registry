@@ -200,6 +200,8 @@ if USE_BIN="$(resolve_use_bin)"; then
   BAD_PLAN="$(
     A3S_USE_HOME="${HOME_BAD}" "${USE_BIN}" plugin plan-install a3s/registry-selftest \
       --registry-name local \
+      --scope-kind user \
+      --scope-id user/registry-local \
       --json 2>&1
   )"
   BAD_PLAN_EC=$?

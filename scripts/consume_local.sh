@@ -76,8 +76,13 @@ trap cleanup EXIT
   --trust-root "${EXPECTED_ROOT}" \
   --json >/dev/null
 
+SCOPE_KIND="${A3S_USE_REGISTRY_SCOPE_KIND:-user}"
+SCOPE_ID="${A3S_USE_REGISTRY_SCOPE_ID:-user/registry-local}"
+
 PLAN_OUT="$("${USE_BIN}" plugin plan-install "${PACKAGE_ID}" \
   --registry-name "${SOURCE_NAME}" \
+  --scope-kind "${SCOPE_KIND}" \
+  --scope-id "${SCOPE_ID}" \
   --json)"
 
 echo "${PLAN_OUT}" | EXPECTED_URL="${URL}" EXPECTED_ROOT="${EXPECTED_ROOT}" EXPECTED_PKG="${PACKAGE_ID}" HOME_TMP="${HOME_TMP}" python3 -c '
