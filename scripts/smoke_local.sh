@@ -3,8 +3,10 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-REGISTRY_DIR="${ROOT_DIR}/registry"
+REGISTRY_DIR="${A3S_USE_REGISTRY_DIR:-${ROOT_DIR}/registry}"
 EXPECTED_ROOT="${A3S_USE_REGISTRY_EXPECTED_ROOT:-sha256:068207b2a075ab53e4a633084637169deee05a2fce33eb0362a870f5462b3d8a}"
+# Relative to registry URL root. Override when smoking a mock multi-package tree.
+TARGET_REL="${A3S_USE_REGISTRY_SMOKE_TARGET:-targets/extensions/a3s/registry-selftest/0.1.0/stable/any/a3s-registry-selftest-0.1.0-any.tar.gz}"
 BASE_URL="${1:-${A3S_USE_REGISTRY_URL:-}}"
 
 if [[ -z "${BASE_URL}" ]]; then
@@ -38,18 +40,17 @@ if [[ "${actual}" != "${EXPECTED_ROOT}" ]]; then
 fi
 
 # Confirm a known admitted target object is reachable.
-target_rel="targets/extensions/a3s/registry-selftest/0.1.0/stable/any/a3s-registry-selftest-0.1.0-any.tar.gz"
-curl -fsS "${BASE_URL}${target_rel}" -o "${tmpdir}/pkg.tar.gz"
+curl -fsS "${BASE_URL}${TARGET_REL}" -o "${tmpdir}/pkg.tar.gz"
 if [[ ! -s "${tmpdir}/pkg.tar.gz" ]]; then
-  echo "error: empty target download for ${target_rel}" >&2
+  echo "error: empty target download for ${TARGET_REL}" >&2
   exit 1
 fi
 
 # On-disk tree must match what is served for the root (transport integrity).
 disk="sha256:$(shasum -a 256 "${REGISTRY_DIR}/metadata/root.json" | awk '{print $1}')"
 if [[ "${disk}" != "${actual}" ]]; then
-  echo "error: served root differs from committed registry/metadata/root.json" >&2
+  echo "error: served root differs from ${REGISTRY_DIR}/metadata/root.json" >&2
   exit 1
 fi
 
-echo "ok base_url=${BASE_URL} root=${actual} target=${target_rel}"
+echo "ok base_url=${BASE_URL} root=${actual} target=${TARGET_REL}"

@@ -92,8 +92,21 @@ a redirect or hostname change never rotates trust.
 
 1. root / timestamp / snapshot / targets metadata are reachable
 2. served `root.json` SHA-256 matches the bootstrap pin
-3. the admitted `a3s/registry-selftest` target artifact downloads
-4. served root matches the committed on-disk `registry/metadata/root.json`
+3. the admitted smoke target downloads (`A3S_USE_REGISTRY_SMOKE_TARGET`, default
+   `a3s/registry-selftest`)
+4. served root matches on-disk `${A3S_USE_REGISTRY_DIR:-registry}/metadata/root.json`
+
+`A3S_USE_REGISTRY_DIR` may point `serve_local.sh` at an ephemeral assembled tree
+(mock multi-package gates). Changing the directory never changes trust; clients
+still pin `--trust-root`.
+
+From the monorepo root, the first-principles gate for `just up::registry` plus
+mock packages (`a3s/mock-alpha`, `a3s/mock-beta`, `a3s/mock-echo`, and
+`a3s/mock-compose` with Tool+MCP+OKF+Skill+UI cross-requires) is:
+
+```bash
+just test::registry
+```
 
 `consume_local.sh` additionally verifies the package-manager client can add the
 source and `plugin plan-install a3s/registry-selftest` against the live local

@@ -6,7 +6,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-REGISTRY_DIR="${ROOT_DIR}/registry"
+REGISTRY_DIR="${A3S_USE_REGISTRY_DIR:-${ROOT_DIR}/registry}"
 STATE_DIR="${A3S_USE_REGISTRY_STATE_DIR:-${ROOT_DIR}/.local/serve}"
 HOST="${A3S_USE_REGISTRY_HOST:-127.0.0.1}"
 PORT="${A3S_USE_REGISTRY_PORT:-4873}"
@@ -22,6 +22,10 @@ Environment:
   A3S_USE_REGISTRY_HOST       Bind address (default: 127.0.0.1)
   A3S_USE_REGISTRY_PORT       Listen port (default: 4873)
   A3S_USE_REGISTRY_STATE_DIR  PID/log directory (default: .local/serve)
+  A3S_USE_REGISTRY_DIR        Directory to serve (default: <repo>/registry)
+                              Must contain metadata/root.json. Used by mock-
+                              package gates; production consumers pin the
+                              committed tree + bootstrap digest, not this path.
 
 The served base URL ends with / and exposes metadata/ and targets/ directly
 (matching the GitHub raw registry/ layout clients expect).
