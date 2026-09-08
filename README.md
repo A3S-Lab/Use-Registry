@@ -53,8 +53,8 @@ publication state (`registry/`).
 It does not own:
 
 - the package manager, Registry formats, or authoring and verification tools;
-  those belong to A3S Use (`crates/registry-tools` there builds and verifies
-  this tree);
+  those belong to A3S Use (`crates/registry-tools` on Use `main`, binary
+  `a3s-use-registry-tools`);
 - package source code for third-party packages; those stay in their owning
   repositories and are admitted as reviewed release artifacts;
 - consumer installation authority; each A3S Use installation owns its selected

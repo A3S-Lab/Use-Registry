@@ -45,7 +45,7 @@ authority. That separation is intentional and must not be collapsed into a
 | Owner | Owns | Must not own |
 | --- | --- | --- |
 | This repository | Admissions, package sources for admitted releases, signed `registry/` tree, local transport scripts | TUF client, Grants, install lifecycle |
-| A3S Use (`a3s-use` package manager) | Source config, TUF refresh, plan/apply, receipts, cache policy | Re-implementing a second Registry publisher inside Cloud or Code |
+| A3S Use (`a3s-use` package manager + `a3s-use-registry-tools`) | Source config, TUF refresh, plan/apply, receipts, cache policy; assemble/sign/verify of Registry trees (`crates/registry-tools` on Use main) | Re-implementing a second Registry publisher inside Cloud or Code |
 | Cloud / product hosts | Selecting sources and trust roots for a deployment | Embedding Docker/OCI registries as Use TUF registries |
 
 `a3s-use` **capability wrappers** (Homebrew `0.1.x` browser/box/office routes)
