@@ -8,10 +8,11 @@ signed tree under `registry/`. It does not change the bootstrap trust root.
 From this repository root:
 
 ```bash
-chmod +x scripts/serve_local.sh scripts/smoke_local.sh   # once
+chmod +x scripts/*.sh   # once
 ./scripts/serve_local.sh start
 ./scripts/serve_local.sh status
 ./scripts/smoke_local.sh
+./scripts/consume_local.sh
 ./scripts/serve_local.sh stop
 ```
 
@@ -29,6 +30,27 @@ Requires `python3` and `curl`. The process serves only the static `registry/`
 directory (metadata + targets). No Docker and no a3s-box are required for this
 preview transport.
 
+`serve_local.sh start` keeps a background `python3 -m http.server` process
+bound to the configured host/port, records a PID file, and refuses to return
+until `metadata/root.json` is reachable. Re-running `start` is idempotent while
+that PID remains healthy.
+
+## Client binary requirement
+
+Consuming the Registry requires the **A3S Use package manager** CLI (`registry`
+and `plugin` routes), for example Use `0.3.x` built from
+[A3S-Lab/Use](https://github.com/A3S-Lab/Use).
+
+Homebrew `a3s-use` **capability wrappers** (currently `0.1.x`: browser / box /
+office routes only) answer `Unknown Use route 'registry'` and cannot consume
+this tree. Point `A3S_USE_BIN` at a package-manager build:
+
+```bash
+# from the Use checkout
+cargo build -p a3s-use
+export A3S_USE_BIN="$PWD/target/debug/a3s-use"
+```
+
 ## Point a client at the local source
 
 Trust is still the bootstrap root digest from the README. Transport is the
@@ -38,15 +60,28 @@ local URL:
 ROOT=sha256:068207b2a075ab53e4a633084637169deee05a2fce33eb0362a870f5462b3d8a
 URL="$(./scripts/serve_local.sh url)"
 
-a3s-use registry source add local \
+"$A3S_USE_BIN" registry source add local \
   --url "${URL}" \
   --trust-root "${ROOT}" \
   --json
+
+"$A3S_USE_BIN" plugin plan-install a3s/registry-selftest \
+  --registry-name local \
+  --json
 ```
 
-Do not treat GitHub, localhost, or any other URL as authority. Replace or
-remove the local source when you are done; a redirect or hostname change never
-rotates trust.
+Or run the bundled consume check (starts the server if needed, uses an
+isolated `A3S_USE_HOME`, and proves TUF refresh + catalog resolution):
+
+```bash
+export A3S_USE_BIN=/path/to/a3s-use   # package-manager binary
+./scripts/consume_local.sh
+```
+
+Loopback `http://127.0.0.1/` is allowed by Use as a local transport; HTTPS is
+still required for non-loopback URLs. Do not treat GitHub, localhost, or any
+other URL as authority. Replace or remove the local source when you are done;
+a redirect or hostname change never rotates trust.
 
 ## Stability checks
 
@@ -58,5 +93,9 @@ rotates trust.
 3. the admitted `a3s/registry-selftest` target artifact downloads
 4. served root matches the committed on-disk `registry/metadata/root.json`
 
-For a longer soak, leave the server running and re-run `./scripts/smoke_local.sh`
-or `./scripts/serve_local.sh status` periodically.
+`consume_local.sh` additionally verifies the package-manager client can add the
+source and `plugin plan-install a3s/registry-selftest` against the live local
+URL (TUF refresh + catalog provenance).
+
+For a longer soak, leave the server running and re-run `./scripts/smoke_local.sh`,
+`./scripts/serve_local.sh status`, or `./scripts/consume_local.sh` periodically.

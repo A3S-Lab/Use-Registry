@@ -86,11 +86,14 @@ For a reproducible local HTTP source of the committed `registry/` tree, see
 ```bash
 ./scripts/serve_local.sh start
 ./scripts/smoke_local.sh
+./scripts/consume_local.sh   # needs A3S_USE_BIN with registry routes
 ./scripts/serve_local.sh status
 ```
 
 Clients pin the same bootstrap root digest as production consumers and select
-the local base URL with `--url`. Localhost is not a trust root.
+the local base URL with `--url`. Localhost is not a trust root. See
+[local-serve.md](local-serve.md) for the package-manager vs capability-wrapper
+distinction.
 
 ## Tooling source
 

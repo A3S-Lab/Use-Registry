@@ -72,8 +72,11 @@ To start a stable local HTTP transport for the committed `registry/` tree
 ```bash
 ./scripts/serve_local.sh start
 ./scripts/smoke_local.sh
+# optional: prove Use package-manager consume (needs A3S_USE_BIN with registry routes)
+./scripts/consume_local.sh
 ```
 
-Default base URL: `http://127.0.0.1:4873/`. Point a client with `--url` and the
-same bootstrap `--trust-root` pin above. Full recipe:
-[docs/local-serve.md](docs/local-serve.md).
+Default base URL: `http://127.0.0.1:4873/`. Point a Use **package-manager**
+client (`0.3.x+`) with `--url` and the same bootstrap `--trust-root` pin above.
+Homebrew capability wrappers without `registry` routes cannot consume this
+tree. Full recipe: [docs/local-serve.md](docs/local-serve.md).
