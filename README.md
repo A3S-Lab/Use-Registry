@@ -63,3 +63,17 @@ authority.
 
 Operators: see [docs/operators.md](docs/operators.md) for custody,
 publication, expiry, rotation, withdrawal, and incident procedures.
+
+## Local serve (dev-preview transport)
+
+To start a stable local HTTP transport for the committed `registry/` tree
+(no Docker):
+
+```bash
+./scripts/serve_local.sh start
+./scripts/smoke_local.sh
+```
+
+Default base URL: `http://127.0.0.1:4873/`. Point a client with `--url` and the
+same bootstrap `--trust-root` pin above. Full recipe:
+[docs/local-serve.md](docs/local-serve.md).

@@ -78,6 +78,20 @@ admission change (supported when the catalog tooling exposes it).
 - **Committed tree unverifiable**: revert the publication commit; the
   previous tree remains the served truth.
 
+## Local serve (transport only)
+
+For a reproducible local HTTP source of the committed `registry/` tree, see
+[local-serve.md](local-serve.md). Summary:
+
+```bash
+./scripts/serve_local.sh start
+./scripts/smoke_local.sh
+./scripts/serve_local.sh status
+```
+
+Clients pin the same bootstrap root digest as production consumers and select
+the local base URL with `--url`. Localhost is not a trust root.
+
 ## Tooling source
 
 `a3s-use-registry-tools` is versioned by the
