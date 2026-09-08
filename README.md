@@ -1,5 +1,11 @@
 # A3S Use Registry
 
+<p align="center">
+  <strong>Language / 语言:</strong>
+  <a href="README.md">English</a> ·
+  <a href="README.zh-CN.md">中文</a>
+</p>
+
 The official signed package Registry deployment for
 [A3S Use](https://github.com/A3S-Lab/Use).
 
