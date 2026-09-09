@@ -65,6 +65,8 @@ dependencies. They do not project into Code or render pages.
       (clean-clone durable P5 tip)
 - [x] Track S1: `packages/applet-demo/a3s-use-extension.acl` byte-equals the
       ACL inside the committed archive (fail closed on source↔signed drift)
+- Monorepo verify: `just test::applet-non-desktop` (includes Track A/J6/S0/S1
+  via `scripts/test_just_registry.sh`)
 
 ## Non-goals
 
