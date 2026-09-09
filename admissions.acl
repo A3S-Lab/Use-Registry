@@ -8,3 +8,15 @@ admission "a3s/registry-selftest" {
   keywords          = ["registry", "selftest"]
   categories        = ["registry"]
 }
+
+admission "a3s/applet-demo" {
+  package_directory  = "packages/applet-demo"
+  channel            = "stable"
+  target             = "any"
+  display_name       = "A3S Applet Demo"
+  description        = "Signed example Applet UI package with activity_bar metadata and declared Tool/MCP dependencies for host projection supply."
+  license            = "Apache-2.0"
+  keywords           = ["applet", "ui", "demo"]
+  categories         = ["examples"]
+  permission_ceiling = "packages/applet-demo/permission-ceiling.json"
+}

@@ -20,7 +20,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SERVE="${ROOT_DIR}/scripts/serve_local.sh"
 SMOKE="${ROOT_DIR}/scripts/smoke_local.sh"
 CONSUME="${ROOT_DIR}/scripts/consume_local.sh"
-EXPECTED_ROOT="${A3S_USE_REGISTRY_EXPECTED_ROOT:-sha256:068207b2a075ab53e4a633084637169deee05a2fce33eb0362a870f5462b3d8a}"
+EXPECTED_ROOT="${A3S_USE_REGISTRY_EXPECTED_ROOT:-sha256:ff399c6a599fd2acea8c3838c6efd073e87321413448c77dfa3b1616d076d172}"
 
 PASS=0
 FAIL=0

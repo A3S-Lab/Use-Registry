@@ -9,8 +9,15 @@
 #   J1 just up::registry becomes honestly ready
 #   J2 smoke: served root == disk root == bootstrap pin
 #   J3 consume selftest plan-install provenance == URL+root
+#   J6 consume committed a3s/applet-demo (ui/panel + targets↔archive digest)
+#       then apply-plan → activity_bar entry digest == committed HTML
 #   J4 just down::registry clears readiness
 #   J5 wrong trust-root fails closed against the just-served URL
+#
+# Track S — supply drift / durable tip (no Use binary)
+#   S0 git HEAD targets.json advertises a3s/applet-demo archive (clean-clone P5)
+#   S1 packages/applet-demo/a3s-use-extension.acl == archive ACL bytes
+#      (prevents bind_tool / surface drift after custody lag)
 #
 # Track M — mocked multi-package publication (alpha, beta, echo, compose)
 #   M1 assemble+verify four mock packages
@@ -28,6 +35,13 @@
 #   C4 skill/ui require edges present in plan catalog
 #   C5 broken requires_tool (missing id) fails assemble
 #
+# Track A — committed admissions include Applet UI supply (a3s/applet-demo)
+#   A1 assemble+verify admissions.acl includes applet-demo
+#   A2 planning covers tool+mcp executables for applet-demo
+#   A3 plan-install applet-demo; catalog has ui/panel with Tool/MCP/Skill binds
+#   A4 apply-plan → capability snapshot activity_bar matches signed package bytes
+#       (deps = UI bind_tool + bind_mcp + skill)
+#
 # Requires (from monorepo): just, python3, curl; A3S_USE_BIN (0.3.x+);
 # A3S_USE_REGISTRY_TOOLS_BIN or a built a3s-use-registry-tools.
 set -euo pipefail
@@ -37,7 +51,7 @@ MONOREPO="$(cd "${REGISTRY_REPO}/.." && pwd)"
 SERVE="${REGISTRY_REPO}/scripts/serve_local.sh"
 SMOKE="${REGISTRY_REPO}/scripts/smoke_local.sh"
 ASSEMBLE_MOCK="${REGISTRY_REPO}/scripts/assemble_mock_registry.sh"
-COMMITTED_ROOT="${A3S_USE_REGISTRY_EXPECTED_ROOT:-sha256:068207b2a075ab53e4a633084637169deee05a2fce33eb0362a870f5462b3d8a}"
+COMMITTED_ROOT="${A3S_USE_REGISTRY_EXPECTED_ROOT:-sha256:ff399c6a599fd2acea8c3838c6efd073e87321413448c77dfa3b1616d076d172}"
 
 PASS=0
 FAIL=0
@@ -216,6 +230,79 @@ assert_ok "J2 smoke committed tree via just transport" env \
   A3S_USE_REGISTRY_DIR="${REGISTRY_REPO}/registry" \
   "${SMOKE}" "${JUST_URL}"
 
+# S1 — first-principles: package source ACL must equal committed archive ACL.
+# Custody republish is the only way to update the archive; source edits that
+# leave the signed tree behind must fail this gate (no Host fixture, no soft skip).
+set +e
+SUPPLY_DRIFT="$(
+  REGISTRY_DIR="${REGISTRY_REPO}/registry" \
+  PACKAGE_ACL="${REGISTRY_REPO}/packages/applet-demo/a3s-use-extension.acl" \
+  python3 - <<'PY'
+import hashlib, os, tarfile
+from pathlib import Path
+
+src = Path(os.environ["PACKAGE_ACL"])
+if not src.is_file():
+    raise SystemExit(f"missing package source ACL: {src}")
+source = src.read_bytes()
+root = Path(os.environ["REGISTRY_DIR"])
+archive = next(root.glob("targets/extensions/a3s/applet-demo/**/a3s-applet-demo-*.tar.gz"))
+with tarfile.open(archive, "r:gz") as tar:
+    member = next(m for m in tar.getmembers() if m.name.endswith("a3s-use-extension.acl"))
+    archived = tar.extractfile(member).read()
+if source != archived:
+    raise SystemExit(
+        "package source ACL drifted from committed archive ACL "
+        f"(source_sha256={hashlib.sha256(source).hexdigest()} "
+        f"archive_sha256={hashlib.sha256(archived).hexdigest()} "
+        f"archive={archive}); republish with custody assemble"
+    )
+if b'bind_tool   = ["echo"]' not in archived:
+    raise SystemExit('committed archive ACL missing bind_tool=["echo"]')
+print("ok")
+PY
+)"
+SUPPLY_DRIFT_EC=$?
+set -e
+if [[ "${SUPPLY_DRIFT_EC}" -eq 0 ]]; then
+  pass "S1 applet-demo package source ACL equals committed archive"
+else
+  fail "S1 applet-demo package source ACL equals committed archive" "${SUPPLY_DRIFT}"
+fi
+
+# S0 — durable tip: git HEAD targets metadata must advertise applet-demo.
+# Working-tree-only custody leaves clean clones without P5 supply; fail closed.
+set +e
+HEAD_SUPPLY="$(
+  cd "${REGISTRY_REPO}" && python3 - <<'PY'
+import json, subprocess, sys
+
+proc = subprocess.run(
+    ["git", "show", "HEAD:registry/metadata/targets.json"],
+    capture_output=True,
+    text=True,
+)
+if proc.returncode != 0:
+    raise SystemExit(f"git show HEAD targets.json failed: {proc.stderr.strip()}")
+targets = json.loads(proc.stdout)["signed"]["targets"]
+keys = [k for k in targets if "applet-demo" in k and k.endswith(".tar.gz")]
+if not keys:
+    raise SystemExit(
+        "HEAD registry/metadata/targets.json has no a3s/applet-demo archive; "
+        "commit packages/applet-demo + signed registry/targets + metadata "
+        "(custody assemble) so clean checkouts keep P5 supply"
+    )
+print("ok")
+PY
+)"
+HEAD_SUPPLY_EC=$?
+set -e
+if [[ "${HEAD_SUPPLY_EC}" -eq 0 ]]; then
+  pass "S0 HEAD targets.json advertises committed applet-demo archive"
+else
+  fail "S0 HEAD targets.json advertises committed applet-demo archive" "${HEAD_SUPPLY}"
+fi
+
 USE_BIN=""
 if USE_BIN="$(resolve_use_bin)"; then
   export A3S_USE_BIN="${USE_BIN}"
@@ -228,6 +315,186 @@ if USE_BIN="$(resolve_use_bin)"; then
     pass "J3 consume selftest provenance"
   else
     fail "J3 consume selftest provenance" "ec=${PLAN_J_EC} out=${PLAN_J}"
+  fi
+
+  # J6 — first-principles: committed tree (not fresh admissions assemble) supplies applet-demo
+  HOME_JA="$(mktemp -d "${WORK}/home-just-applet.XXXXXX")"
+  set +e
+  PLAN_JA="$(plan_install "${HOME_JA}" "${JUST_URL}" "${COMMITTED_ROOT}" "a3s/applet-demo" "just-applet" 2>&1)"
+  PLAN_JA_EC=$?
+  set -e
+  if [[ "${PLAN_JA_EC}" -eq 0 ]] && check_plan_provenance "${PLAN_JA}" "${JUST_URL}" "${COMMITTED_ROOT}" "a3s/applet-demo"; then
+    pass "J6 plan-install committed applet-demo provenance"
+  else
+    fail "J6 plan-install committed applet-demo provenance" "ec=${PLAN_JA_EC} out=${PLAN_JA}"
+  fi
+  set +e
+  APPLET_COMMITTED="$(
+    PLAN_JSON="${PLAN_JA}" REGISTRY_DIR="${REGISTRY_REPO}/registry" python3 - <<'PY'
+import hashlib, json, os, tarfile
+from pathlib import Path
+
+payload = json.loads(os.environ["PLAN_JSON"])
+if not payload.get("ok"):
+    raise SystemExit("plan not ok")
+catalog = payload["data"]["plan"]["packageLock"]["packages"][0]["catalog"]
+surfaces = []
+if isinstance(catalog, dict):
+    surfaces = catalog.get("record", {}).get("surfaces") or catalog.get("surfaces") or []
+ids = {(s.get("kind"), s.get("id")) for s in surfaces}
+need = {
+    ("tool", "echo"),
+    ("mcp", "context"),
+    ("skill", "applet-demo"),
+    ("ui", "panel"),
+}
+missing = need - ids
+if missing:
+    raise SystemExit(f"missing surfaces {sorted(missing)}; have {sorted(ids)}")
+ui = next(s for s in surfaces if s.get("kind") == "ui" and s.get("id") == "panel")
+requires = {(r.get("kind"), r.get("id")) for r in ui.get("requires", [])}
+# Committed archive must match package source: UI binds Executable Tool echo +
+# MCP context + Skill applet-demo (same contract as Track A A3).
+need_req = {("tool", "echo"), ("mcp", "context"), ("skill", "applet-demo")}
+missing_req = need_req - requires
+if missing_req:
+    raise SystemExit(f"ui missing requires {sorted(missing_req)}; have {sorted(requires)}")
+
+root = Path(os.environ["REGISTRY_DIR"])
+archive = next(root.glob("targets/extensions/a3s/applet-demo/**/a3s-applet-demo-*.tar.gz"))
+archive_bytes = archive.read_bytes()
+archive_digest = hashlib.sha256(archive_bytes).hexdigest()
+targets = json.loads((root / "metadata" / "targets.json").read_text())["signed"]["targets"]
+target_key = next(k for k in targets if k.endswith("a3s-applet-demo-0.1.0-any.tar.gz"))
+meta_hash = targets[target_key]["hashes"]["sha256"]
+if meta_hash != archive_digest:
+    raise SystemExit(
+        f"targets.json sha256 {meta_hash!r} != committed archive file {archive_digest!r}"
+    )
+with tarfile.open(archive, "r:gz") as tar:
+    member = next(m for m in tar.getmembers() if m.name.endswith("ui/panel/index.html"))
+    html = tar.extractfile(member).read()
+    acl_member = next(m for m in tar.getmembers() if m.name.endswith("a3s-use-extension.acl"))
+    manifest = tar.extractfile(acl_member).read().decode()
+if b"Applet Demo" not in html:
+    raise SystemExit("committed archive HTML missing package title bytes")
+if 'bind_tool   = ["echo"]' not in manifest:
+    raise SystemExit("committed archive manifest missing bind_tool=[\"echo\"]")
+print(json.dumps({"htmlSha256": hashlib.sha256(html).hexdigest(), "archiveSha256": archive_digest}))
+PY
+  )"
+  APPLET_COMMITTED_EC=$?
+  set -e
+  if [[ "${APPLET_COMMITTED_EC}" -eq 0 ]]; then
+    pass "J6 committed applet-demo catalog ui/panel + archive bytes"
+  else
+    fail "J6 committed applet-demo catalog ui/panel + archive bytes" "${APPLET_COMMITTED}"
+  fi
+
+  # J6b — apply from committed tree; activity_bar entry digest == committed HTML
+  set +e
+  APPLET_APPLY="$(
+    PLAN_JSON="${PLAN_JA}" HOME_JSON="${HOME_JA}" USE_BIN_JSON="${USE_BIN}" \
+    REGISTRY_DIR="${REGISTRY_REPO}/registry" python3 - <<'PY'
+import hashlib, json, os, subprocess, tarfile
+from pathlib import Path
+
+payload = json.loads(os.environ["PLAN_JSON"])
+if not payload.get("ok"):
+    raise SystemExit(f"plan not ok: {payload}")
+plan = payload["data"]["plan"]
+operation_id = plan["plan"]["operationId"]
+plan_digest = plan["planDigest"]
+env = os.environ.copy()
+env["A3S_USE_HOME"] = os.environ["HOME_JSON"]
+proc = subprocess.run(
+    [
+        os.environ["USE_BIN_JSON"],
+        "plugin",
+        "apply-plan",
+        "--operation-id",
+        operation_id,
+        "--plan-digest",
+        plan_digest,
+        "--scope-kind",
+        "user",
+        "--scope-id",
+        "user/registry-gate",
+        "--yes",
+        "--json",
+    ],
+    env=env,
+    capture_output=True,
+    text=True,
+)
+if proc.returncode != 0:
+    raise SystemExit(f"apply-plan failed ec={proc.returncode} out={proc.stdout} err={proc.stderr}")
+applied = json.loads(proc.stdout)
+if not applied.get("ok"):
+    raise SystemExit(f"apply-plan not ok: {applied}")
+state = applied["data"].get("state") or {}
+if state.get("observed") != "ready" or state.get("desired") != "enabled":
+    raise SystemExit(f"apply state not ready/enabled: {state}")
+
+proc = subprocess.run(
+    [
+        os.environ["USE_BIN_JSON"],
+        "capability",
+        "snapshot",
+        "--scope-kind",
+        "user",
+        "--scope-id",
+        "user/registry-gate",
+        "--json",
+    ],
+    env=env,
+    capture_output=True,
+    text=True,
+)
+if proc.returncode != 0:
+    raise SystemExit(f"capability snapshot failed ec={proc.returncode} out={proc.stdout} err={proc.stderr}")
+snap = json.loads(proc.stdout)
+if not snap.get("ok"):
+    raise SystemExit(f"snapshot not ok: {snap}")
+caps = snap["data"]["registry"].get("capabilities") or []
+applet = next((c for c in caps if c.get("alias") == "applet-demo"), None)
+if applet is None:
+    raise SystemExit(f"missing applet-demo capability; aliases={[c.get('alias') for c in caps]}")
+if not applet.get("enabled"):
+    raise SystemExit(f"applet-demo capability not enabled: {applet.get('readiness')}")
+bars = applet.get("activityBar") or []
+if len(bars) != 1:
+    raise SystemExit(f"expected one activity_bar entry, got {len(bars)}")
+bar = bars[0]
+if bar.get("id") != "panel" or bar.get("title") != "Applet Demo" or bar.get("icon") != "layout" or bar.get("order") != 20:
+    raise SystemExit(f"activity_bar presentation drifted: {bar}")
+need_deps = {("tool", "echo"), ("mcp", "context"), ("skill", "applet-demo")}
+have_deps = {(d.get("kind"), d.get("id")) for d in bar.get("dependencies") or []}
+missing = need_deps - have_deps
+if missing:
+    raise SystemExit(f"activity_bar missing deps {sorted(missing)}; have {sorted(have_deps)}")
+entry_digest = (bar.get("entry") or {}).get("sha256")
+if not entry_digest:
+    raise SystemExit("activity_bar entry digest missing")
+root = Path(os.environ["REGISTRY_DIR"])
+archive = next(root.glob("targets/extensions/a3s/applet-demo/**/a3s-applet-demo-*.tar.gz"))
+with tarfile.open(archive, "r:gz") as tar:
+    member = next(m for m in tar.getmembers() if m.name.endswith("ui/panel/index.html"))
+    html = tar.extractfile(member).read()
+expected = hashlib.sha256(html).hexdigest()
+if entry_digest != expected:
+    raise SystemExit(
+        f"activity_bar entry digest {entry_digest!r} != committed archive HTML {expected!r}"
+    )
+print("ok")
+PY
+  )"
+  APPLET_APPLY_EC=$?
+  set -e
+  if [[ "${APPLET_APPLY_EC}" -eq 0 ]]; then
+    pass "J6 apply-plan committed applet-demo activity_bar matches archive"
+  else
+    fail "J6 apply-plan committed applet-demo activity_bar matches archive" "${APPLET_APPLY}"
   fi
 
   HOME_JBAD="$(mktemp -d "${WORK}/home-just-bad.XXXXXX")"
@@ -244,6 +511,9 @@ if USE_BIN="$(resolve_use_bin)"; then
   fi
 else
   skip "J3 consume selftest provenance" "set A3S_USE_BIN"
+  skip "J6 plan-install committed applet-demo provenance" "set A3S_USE_BIN"
+  skip "J6 committed applet-demo catalog ui/panel + archive bytes" "set A3S_USE_BIN"
+  skip "J6 apply-plan committed applet-demo activity_bar matches archive" "set A3S_USE_BIN"
   skip "J5 wrong trust-root fails on just URL" "requires A3S_USE_BIN"
 fi
 
@@ -514,6 +784,283 @@ if [[ -n "${TOOLS_BIN}" ]]; then
   fi
 else
   skip "C5 broken skill requires_tool fails assemble" "registry-tools missing"
+fi
+
+# --- Track A: committed admissions Applet UI supply --------------------------
+# Mock transport still holds MOCK_PORT; release it before admissions serve.
+"${SERVE}" stop >/dev/null 2>&1 || true
+ADMISSIONS_ROOT="${WORK}/admissions-applet"
+mkdir -p "${ADMISSIONS_ROOT}"
+TOOLS_BIN="${A3S_USE_REGISTRY_TOOLS_BIN:-}"
+if [[ -z "${TOOLS_BIN}" || ! -x "${TOOLS_BIN}" ]]; then
+  for candidate in \
+    "${MONOREPO}/crates/use/target/release/a3s-use-registry-tools" \
+    "${MONOREPO}/crates/use/target/debug/a3s-use-registry-tools"; do
+    if [[ -x "${candidate}" ]]; then
+      TOOLS_BIN="${candidate}"
+      break
+    fi
+  done
+fi
+if [[ -n "${TOOLS_BIN}" ]]; then
+  "${TOOLS_BIN}" keygen --keys-dir "${ADMISSIONS_ROOT}/keys" >/dev/null
+  set +e
+  ADMISSION_META="$("${TOOLS_BIN}" assemble \
+    --keys-dir "${ADMISSIONS_ROOT}/keys" \
+    --admissions "${REGISTRY_REPO}/admissions.acl" \
+    --out-root "${ADMISSIONS_ROOT}/registry" 2>&1)"
+  ADMISSION_EC=$?
+  set -e
+  if [[ "${ADMISSION_EC}" -eq 0 ]]; then
+    "${TOOLS_BIN}" verify --registry "${ADMISSIONS_ROOT}/registry" >/dev/null
+    pass "A1 assemble+verify admissions includes applet-demo"
+  else
+    fail "A1 assemble+verify admissions includes applet-demo" "${ADMISSION_META}"
+  fi
+
+  set +e
+  APPLET_PLANNING_CHECK="$(
+    REGISTRY_DIR="${ADMISSIONS_ROOT}/registry" python3 - <<'PY'
+import json, os, pathlib, sys
+root = pathlib.Path(os.environ["REGISTRY_DIR"])
+planning = list(root.glob("targets/extensions/a3s/applet-demo/**/planning-v1.json"))
+if not planning:
+    raise SystemExit("missing applet-demo planning-v1.json")
+bundle = json.loads(planning[0].read_text())
+kinds = {s.get("kind") for s in bundle.get("surfaces", [])}
+ids = {s.get("id") for s in bundle.get("surfaces", [])}
+need_kinds = {"tool-task-native", "mcp-stdio"}
+need_ids = {"echo", "context"}
+missing_kinds = need_kinds - kinds
+missing_ids = need_ids - ids
+if missing_kinds or missing_ids:
+    raise SystemExit(
+        f"kinds={sorted(kinds)} missing_kinds={sorted(missing_kinds)} "
+        f"ids={sorted(ids)} missing_ids={sorted(missing_ids)}"
+    )
+print("ok")
+PY
+  )"
+  APPLET_PLANNING_EC=$?
+  set -e
+  if [[ "${APPLET_PLANNING_EC}" -eq 0 ]]; then
+    pass "A2 applet-demo planning covers tool+mcp"
+  else
+    fail "A2 applet-demo planning covers tool+mcp" "${APPLET_PLANNING_CHECK}"
+  fi
+
+  if [[ -n "${USE_BIN}" ]]; then
+    ADMISSION_SHA="$(
+      REGISTRY_DIR="${ADMISSIONS_ROOT}/registry" python3 - <<'PY'
+import hashlib, pathlib, os
+root = pathlib.Path(os.environ["REGISTRY_DIR"]) / "metadata" / "root.json"
+digest = hashlib.sha256(root.read_bytes()).hexdigest()
+print(f"sha256:{digest}")
+PY
+    )"
+    export A3S_USE_REGISTRY_DIR="${ADMISSIONS_ROOT}/registry"
+    export A3S_USE_REGISTRY_PORT="${MOCK_PORT}"
+    export A3S_USE_REGISTRY_STATE_DIR="${ADMISSIONS_ROOT}/state"
+    export A3S_USE_REGISTRY_EXPECTED_ROOT="${ADMISSION_SHA}"
+    mkdir -p "${ADMISSIONS_ROOT}/state"
+    assert_ok "A3 start admissions applet registry" "${SERVE}" start
+    ADMISSION_URL="$("${SERVE}" url)"
+    HOME_A="$(mktemp -d "${WORK}/home-applet.XXXXXX")"
+    set +e
+    PLAN_A="$(plan_install "${HOME_A}" "${ADMISSION_URL}" "${ADMISSION_SHA}" "a3s/applet-demo" "applet-demo" 2>&1)"
+    PLAN_A_EC=$?
+    set -e
+    if [[ "${PLAN_A_EC}" -eq 0 ]] && check_plan_provenance "${PLAN_A}" "${ADMISSION_URL}" "${ADMISSION_SHA}" "a3s/applet-demo"; then
+      pass "A3 plan-install applet-demo provenance"
+    else
+      fail "A3 plan-install applet-demo provenance" "ec=${PLAN_A_EC} out=${PLAN_A}"
+    fi
+    set +e
+    APPLET_SURFACES="$(
+      PLAN_JSON="${PLAN_A}" REGISTRY_DIR="${ADMISSIONS_ROOT}/registry" python3 - <<'PY'
+import json, os, tarfile, io, pathlib, sys
+payload = json.loads(os.environ["PLAN_JSON"])
+if not payload.get("ok"):
+    raise SystemExit("plan not ok")
+catalog = payload["data"]["plan"]["packageLock"]["packages"][0]["catalog"]
+surfaces = []
+if isinstance(catalog, dict):
+    surfaces = catalog.get("record", {}).get("surfaces") or catalog.get("surfaces") or []
+ids = {(s.get("kind"), s.get("id")) for s in surfaces}
+need = {
+    ("tool", "echo"),
+    ("mcp", "context"),
+    ("skill", "applet-demo"),
+    ("ui", "panel"),
+}
+missing = need - ids
+if missing:
+    raise SystemExit(f"missing surfaces {sorted(missing)}; have {sorted(ids)}")
+ui = next(s for s in surfaces if s.get("kind") == "ui" and s.get("id") == "panel")
+requires = {(r.get("kind"), r.get("id")) for r in ui.get("requires", [])}
+need_req = {("mcp", "context"), ("skill", "applet-demo"), ("tool", "echo")}
+missing_req = need_req - requires
+if missing_req:
+    raise SystemExit(f"ui missing requires {sorted(missing_req)}; have {sorted(requires)}")
+# UI binds package-local Executable Tool + MCP + Skill. Presentation metadata
+# lives in the signed package manifest (activity_bar supply).
+root = pathlib.Path(os.environ["REGISTRY_DIR"])
+archive = next(root.glob("targets/extensions/a3s/applet-demo/**/a3s-applet-demo-*.tar.gz"))
+with tarfile.open(archive, "r:gz") as tar:
+    member = next(m for m in tar.getmembers() if m.name.endswith("a3s-use-extension.acl"))
+    manifest = tar.extractfile(member).read().decode()
+for needle in ('title       = "Applet Demo"', 'icon        = "layout"', "order       = 20", 'bind_tool   = ["echo"]'):
+    if needle not in manifest:
+        raise SystemExit(f"package manifest missing {needle!r}")
+print("ok")
+PY
+    )"
+    APPLET_SURFACES_EC=$?
+    set -e
+    if [[ "${APPLET_SURFACES_EC}" -eq 0 ]]; then
+      pass "A3 applet-demo catalog ui/panel + binds"
+    else
+      fail "A3 applet-demo catalog ui/panel + binds" "${APPLET_SURFACES} plan=${PLAN_A}"
+    fi
+
+    # A4 — real Plugin Manager apply; activity_bar entry digest == signed archive HTML
+    set +e
+    APPLY_META="$(
+      PLAN_JSON="${PLAN_A}" HOME_JSON="${HOME_A}" USE_BIN_JSON="${USE_BIN}" python3 - <<'PY'
+import json, os, subprocess, sys
+payload = json.loads(os.environ["PLAN_JSON"])
+if not payload.get("ok"):
+    raise SystemExit(f"plan not ok: {payload}")
+plan = payload["data"]["plan"]
+operation_id = plan["plan"]["operationId"]
+plan_digest = plan["planDigest"]
+env = os.environ.copy()
+env["A3S_USE_HOME"] = os.environ["HOME_JSON"]
+proc = subprocess.run(
+    [
+        os.environ["USE_BIN_JSON"],
+        "plugin",
+        "apply-plan",
+        "--operation-id",
+        operation_id,
+        "--plan-digest",
+        plan_digest,
+        "--scope-kind",
+        "user",
+        "--scope-id",
+        "user/registry-gate",
+        "--yes",
+        "--json",
+    ],
+    env=env,
+    capture_output=True,
+    text=True,
+)
+if proc.returncode != 0:
+    raise SystemExit(f"apply-plan failed ec={proc.returncode} out={proc.stdout} err={proc.stderr}")
+applied = json.loads(proc.stdout)
+if not applied.get("ok"):
+    raise SystemExit(f"apply-plan not ok: {applied}")
+state = applied["data"].get("state") or {}
+if state.get("observed") != "ready" or state.get("desired") != "enabled":
+    raise SystemExit(f"apply state not ready/enabled: {state}")
+print(json.dumps({"operationId": operation_id, "planDigest": plan_digest}))
+PY
+    )"
+    APPLY_EC=$?
+    set -e
+    if [[ "${APPLY_EC}" -eq 0 ]]; then
+      pass "A4 apply-plan applet-demo ready"
+    else
+      fail "A4 apply-plan applet-demo ready" "${APPLY_META}"
+    fi
+
+    set +e
+    APPLET_ACTIVITY="$(
+      HOME_JSON="${HOME_A}" USE_BIN_JSON="${USE_BIN}" REGISTRY_DIR="${ADMISSIONS_ROOT}/registry" python3 - <<'PY'
+import hashlib, json, os, subprocess, tarfile
+from pathlib import Path
+
+env = os.environ.copy()
+env["A3S_USE_HOME"] = os.environ["HOME_JSON"]
+proc = subprocess.run(
+    [
+        os.environ["USE_BIN_JSON"],
+        "capability",
+        "snapshot",
+        "--scope-kind",
+        "user",
+        "--scope-id",
+        "user/registry-gate",
+        "--json",
+    ],
+    env=env,
+    capture_output=True,
+    text=True,
+)
+if proc.returncode != 0:
+    raise SystemExit(f"capability snapshot failed ec={proc.returncode} out={proc.stdout} err={proc.stderr}")
+snap = json.loads(proc.stdout)
+if not snap.get("ok"):
+    raise SystemExit(f"snapshot not ok: {snap}")
+caps = snap["data"]["registry"].get("capabilities") or []
+applet = next((c for c in caps if c.get("alias") == "applet-demo"), None)
+if applet is None:
+    raise SystemExit(f"missing applet-demo capability; aliases={[c.get('alias') for c in caps]}")
+if not applet.get("enabled"):
+    raise SystemExit(f"applet-demo capability not enabled: {applet.get('readiness')}")
+bars = applet.get("activityBar") or []
+if len(bars) != 1:
+    raise SystemExit(f"expected one activity_bar entry, got {len(bars)}")
+bar = bars[0]
+if bar.get("id") != "panel" or bar.get("title") != "Applet Demo" or bar.get("icon") != "layout" or bar.get("order") != 20:
+    raise SystemExit(f"activity_bar presentation drifted: {bar}")
+# Match signed UI binds: Tool + MCP + Skill (canonical PluginSurfaceRef order).
+need_deps = {("mcp", "context"), ("skill", "applet-demo"), ("tool", "echo")}
+have_deps = {(d.get("kind"), d.get("id")) for d in bar.get("dependencies") or []}
+missing = need_deps - have_deps
+if missing:
+    raise SystemExit(f"activity_bar missing deps {sorted(missing)}; have {sorted(have_deps)}")
+entry_digest = (bar.get("entry") or {}).get("sha256")
+if not entry_digest:
+    raise SystemExit("activity_bar entry digest missing")
+root = Path(os.environ["REGISTRY_DIR"])
+archive = next(root.glob("targets/extensions/a3s/applet-demo/**/a3s-applet-demo-*.tar.gz"))
+with tarfile.open(archive, "r:gz") as tar:
+    member = next(m for m in tar.getmembers() if m.name.endswith("ui/panel/index.html"))
+    html = tar.extractfile(member).read()
+expected = hashlib.sha256(html).hexdigest()
+if entry_digest != expected:
+    raise SystemExit(
+        f"activity_bar entry digest {entry_digest!r} != signed archive HTML {expected!r}"
+    )
+if b"Applet Demo" not in html:
+    raise SystemExit("signed archive HTML missing package title bytes")
+print("ok")
+PY
+    )"
+    APPLET_ACTIVITY_EC=$?
+    set -e
+    if [[ "${APPLET_ACTIVITY_EC}" -eq 0 ]]; then
+      pass "A4 applet-demo activity_bar matches signed UI bytes"
+    else
+      fail "A4 applet-demo activity_bar matches signed UI bytes" "${APPLET_ACTIVITY}"
+    fi
+
+    assert_ok "A3 stop admissions applet registry" "${SERVE}" stop
+  else
+    skip "A3 plan-install applet-demo provenance" "requires A3S_USE_BIN"
+    skip "A3 applet-demo catalog ui/panel + binds" "requires A3S_USE_BIN"
+    skip "A4 apply-plan applet-demo ready" "requires A3S_USE_BIN"
+    skip "A4 applet-demo activity_bar matches signed UI bytes" "requires A3S_USE_BIN"
+  fi
+else
+  skip "A1 assemble+verify admissions includes applet-demo" "registry-tools missing"
+  skip "A2 applet-demo planning covers tool+mcp" "registry-tools missing"
+  skip "A3 plan-install applet-demo provenance" "registry-tools missing"
+  skip "A3 applet-demo catalog ui/panel + binds" "registry-tools missing"
+  skip "A4 apply-plan applet-demo ready" "registry-tools missing"
+  skip "A4 applet-demo activity_bar matches signed UI bytes" "registry-tools missing"
 fi
 
 assert_ok "M7 stop mock transport" "${SERVE}" stop

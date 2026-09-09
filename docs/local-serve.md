@@ -57,7 +57,7 @@ Trust is still the bootstrap root digest from the README. Transport is the
 local URL:
 
 ```bash
-ROOT=sha256:068207b2a075ab53e4a633084637169deee05a2fce33eb0362a870f5462b3d8a
+ROOT=sha256:ff399c6a599fd2acea8c3838c6efd073e87321413448c77dfa3b1616d076d172
 URL="$(./scripts/serve_local.sh url)"
 
 "$A3S_USE_BIN" registry source add local \
