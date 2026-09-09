@@ -61,6 +61,8 @@ dependencies. They do not project into Code or render pages.
       Skill `applet-demo`; archive manifest `bind_tool=["echo"]`;
       `targets.json` sha256 matches archive bytes; apply-plan `activity_bar`
       entry digest equals committed HTML with the same Tool/MCP/Skill deps
+- [x] Track S0: git HEAD `targets.json` advertises `a3s/applet-demo` archive
+      (clean-clone durable P5 tip)
 - [x] Track S1: `packages/applet-demo/a3s-use-extension.acl` byte-equals the
       ACL inside the committed archive (fail closed on source↔signed drift)
 
